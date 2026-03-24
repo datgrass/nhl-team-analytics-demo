@@ -1,0 +1,29 @@
+command:
+  - uvicorn
+  - backend.main:app
+  - --host
+  - 0.0.0.0
+  - --port
+  - "8000"
+
+env:
+  - name: PUCKPEDIA_API_KEY
+    value: JokWhjFFF872JK8jf009NHNk
+  - name: DATABRICKS_WAREHOUSE_ID
+    value: c6b1b633e4072e67
+  - name: LAKEBASE_HOST
+    value: ep-autumn-tooth-d8ze9bdj.database.us-east-2.cloud.databricks.com
+
+resources:
+  - name: serving-endpoint
+    serving_endpoint:
+      name: databricks-claude-sonnet-4-5
+      permission: CAN_QUERY
+  - name: sql-warehouse
+    sql_warehouse:
+      id: c6b1b633e4072e67
+      permission: CAN_USE
+  - name: lakebase
+    database:
+      name: nhl-comments
+      permission: CAN_QUERY

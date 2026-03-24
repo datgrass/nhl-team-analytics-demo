@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #1a1a2e;
+}
+::-webkit-scrollbar-thumb {
+  background: #6F263D;
+  border-radius: 3px;
+}
+
+/* Subtle card glow */
+.card-glow {
+  box-shadow: 0 0 20px rgba(111, 38, 61, 0.15);
+}
+
+.card-glow:hover {
+  box-shadow: 0 0 30px rgba(111, 38, 61, 0.25);
+}
