@@ -198,25 +198,97 @@ async def fetch_json(url: str, params: dict | None = None) -> dict:
         return resp.json()
 
 
+def _int(v):
+    try: return int(v)
+    except: return 0
+
+def _float(v):
+    try: return float(v)
+    except: return 0.0
+
+def transform_skater(r: dict) -> dict:
+    """Transform Delta snake_case row to NHL API camelCase format."""
+    return {
+        "playerId": _int(r.get("player_id")),
+        "headshot": r.get("headshot_url", ""),
+        "firstName": {"default": r.get("first_name", "")},
+        "lastName": {"default": r.get("last_name", "")},
+        "positionCode": r.get("position", ""),
+        "gamesPlayed": _int(r.get("games_played")),
+        "goals": _int(r.get("goals")),
+        "assists": _int(r.get("assists")),
+        "points": _int(r.get("points")),
+        "plusMinus": _int(r.get("plus_minus")),
+        "penaltyMinutes": _int(r.get("penalty_minutes")),
+        "powerPlayGoals": _int(r.get("power_play_goals")),
+        "shorthandedGoals": _int(r.get("shorthanded_goals")),
+        "gameWinningGoals": _int(r.get("game_winning_goals")),
+        "shots": _int(r.get("shots")),
+        "shootingPctg": _float(r.get("shooting_pctg", 0)) / 100,
+        "avgTimeOnIcePerGame": _float(r.get("avg_toi_seconds")),
+        "faceoffWinPctg": _float(r.get("faceoff_win_pctg", 0)) / 100,
+    }
+
+def transform_goalie(r: dict) -> dict:
+    """Transform Delta snake_case row to NHL API camelCase format."""
+    return {
+        "playerId": _int(r.get("player_id")),
+        "headshot": r.get("headshot_url", ""),
+        "firstName": {"default": r.get("first_name", "")},
+        "lastName": {"default": r.get("last_name", "")},
+        "gamesPlayed": _int(r.get("games_played")),
+        "wins": _int(r.get("wins")),
+        "losses": _int(r.get("losses")),
+        "overtimeLosses": _int(r.get("ot_losses")),
+        "goalsAgainstAverage": _float(r.get("gaa")),
+        "savePercentage": _float(r.get("save_pctg", 0)) / 100,
+        "shutouts": _int(r.get("shutouts")),
+        "timeOnIce": _int(r.get("time_on_ice", 0)),
+    }
+
+
 @app.get("/api/stats")
 async def get_player_stats():
     """Player stats — tries Delta tables first, falls back to live API."""
+    delta_error = None
     try:
-        skaters = await execute_sql(f"SELECT * FROM {CATALOG}.{SCHEMA}.player_stats_current ORDER BY points DESC")
-        goalies = await execute_sql(f"SELECT * FROM {CATALOG}.{SCHEMA}.goalie_stats_current ORDER BY wins DESC")
-        if skaters:
+        skaters_raw = await execute_sql(f"SELECT * FROM {CATALOG}.{SCHEMA}.player_stats_current ORDER BY CAST(points AS INT) DESC")
+        goalies_raw = await execute_sql(f"SELECT * FROM {CATALOG}.{SCHEMA}.goalie_stats_current ORDER BY CAST(wins AS INT) DESC")
+        if skaters_raw:
+            skaters = [transform_skater(r) for r in skaters_raw]
+            goalies = [transform_goalie(r) for r in goalies_raw]
             return {"skaters": skaters, "goalies": goalies, "source": "databricks"}
-    except Exception:
-        pass
+    except Exception as e:
+        delta_error = str(e)
 
     # Fallback to live API
     try:
         data = await fetch_json(f"{NHL_API_BASE}/club-stats/{TEAM_ABBREV}/now")
         skaters = sorted(data.get("skaters", []), key=lambda x: x.get("points", 0), reverse=True)
         goalies = data.get("goalies", [])
-        return {"skaters": skaters, "goalies": goalies, "source": "nhl_api"}
+        return {"skaters": skaters, "goalies": goalies, "source": "nhl_api", "delta_error": delta_error}
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"NHL API error: {e}")
+        raise HTTPException(status_code=502, detail=f"Both sources failed. Delta: {delta_error}. NHL API: {e}")
+
+
+@app.get("/api/debug")
+async def debug():
+    """Debug endpoint to test connectivity."""
+    results = {}
+    try:
+        data = await fetch_json(f"{NHL_API_BASE}/club-stats/{TEAM_ABBREV}/now")
+        results["nhl_api"] = f"OK - {len(data.get('skaters',[]))} skaters"
+    except Exception as e:
+        results["nhl_api"] = f"ERROR: {e}"
+    try:
+        rows = await execute_sql(f"SELECT COUNT(*) as cnt FROM {CATALOG}.{SCHEMA}.player_stats_current")
+        results["delta"] = f"OK - {rows[0]['cnt']} rows"
+    except Exception as e:
+        results["delta"] = f"ERROR: {e}"
+    results["host"] = DATABRICKS_HOST
+    results["warehouse"] = SQL_WAREHOUSE_ID
+    results["client_id"] = DATABRICKS_CLIENT_ID[:8] + "..." if DATABRICKS_CLIENT_ID else "missing"
+    return results
 
 
 @app.get("/api/roster")
@@ -306,9 +378,35 @@ async def get_standings():
 async def get_contracts():
     """Contracts — tries Delta first, falls back to live API."""
     try:
-        rows = await execute_sql(f"SELECT * FROM {CATALOG}.{SCHEMA}.contracts ORDER BY cap_hit DESC")
+        rows = await execute_sql(f"SELECT * FROM {CATALOG}.{SCHEMA}.contracts ORDER BY CAST(cap_hit AS DOUBLE) DESC")
         if rows:
-            return {"contracts": rows, "source": "databricks"}
+            # Transform flat Delta rows to Puck Pedia nested format for frontend
+            contracts = []
+            for r in rows:
+                contracts.append({
+                    "player_id": r.get("player_id", ""),
+                    "first_name": r.get("first_name", ""),
+                    "last_name": r.get("last_name", ""),
+                    "position": r.get("position", ""),
+                    "position_detail": r.get("position_detail", ""),
+                    "jersey_number": r.get("jersey_number", ""),
+                    "nhl_games": _int(r.get("nhl_games")),
+                    "current": [{
+                        "contract_type": r.get("contract_type", ""),
+                        "length": _int(r.get("contract_length")),
+                        "value": r.get("total_value", "0"),
+                        "signing_status": r.get("signing_status", ""),
+                        "contract_end": r.get("contract_end", ""),
+                        "expiry_status": r.get("expiry_status", ""),
+                        "years": [{
+                            "season": "2025-2026",
+                            "cap_hit": r.get("cap_hit", "0"),
+                            "aav": r.get("aav", "0"),
+                            "base_salary": r.get("cap_hit", "0"),
+                        }],
+                    }],
+                })
+            return contracts
     except Exception:
         pass
 
@@ -325,7 +423,23 @@ async def get_cap_data():
     try:
         rows = await execute_sql(f"SELECT * FROM {CATALOG}.{SCHEMA}.cap_projections ORDER BY season")
         if rows:
-            return {"team": "Colorado Avalanche", "seasons": rows, "source": "databricks"}
+            seasons = []
+            for r in rows:
+                seasons.append({
+                    "season": r["season"],
+                    "salary_cap": _int(r.get("salary_cap")),
+                    "current_roster_annual_cap_hit": _int(r.get("projected_cap_hit")),
+                    "projected_cap_hit": _int(r.get("projected_cap_hit")),
+                    "projected_cap_space": _int(r.get("projected_cap_space")),
+                    "current_cap_space": _int(r.get("projected_cap_space")),
+                    "cap_hit_forwards": _int(r.get("cap_hit_forwards")),
+                    "cap_hit_defence": _int(r.get("cap_hit_defence")),
+                    "cap_hit_goalies": _int(r.get("cap_hit_goalies")),
+                    "roster_count": _int(r.get("roster_count")),
+                    "contracts": _int(r.get("contracts")),
+                    "ltir": _int(r.get("ltir")),
+                })
+            return {"team": "Colorado Avalanche", "seasons": seasons, "source": "databricks"}
     except Exception:
         pass
 
@@ -720,12 +834,20 @@ async def chat(req: ChatRequest):
 
 
 # Serve React static files
+# Mount static assets first, then add SPA catch-all as an event handler
 static_dir = Path(__file__).parent / "static"
-if static_dir.exists():
+
+if static_dir.exists() and (static_dir / "assets").exists():
     app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
 
-    @app.get("/{full_path:path}")
+
+@app.on_event("startup")
+async def _register_spa():
+    """Register the SPA catch-all route LAST, after all API routes."""
+    @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
+        if not static_dir.exists():
+            raise HTTPException(status_code=404)
         file_path = static_dir / full_path
         if file_path.exists() and file_path.is_file():
             return FileResponse(file_path)

@@ -39,7 +39,7 @@ function App() {
         setGoalies(statsRes.goalies || []);
         setGames(scheduleRes.games || []);
         setCapSeasons(capRes.seasons || []);
-        setContracts(contractsRes.contracts || contractsRes || []);
+        setContracts(Array.isArray(contractsRes) ? contractsRes : contractsRes.contracts || []);
 
         // Track data source
         setDataSource(statsRes.source || "nhl_api");
