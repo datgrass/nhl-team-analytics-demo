@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 
 interface Comment {
   id: number;
@@ -41,6 +41,7 @@ export default function CommentsPanel({ gameId, selectedEventId, selectedEventTy
   const [editText, setEditText] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const editRef = useRef<HTMLInputElement>(null);
+  const shouldScrollRef = useRef(false);
 
   function buildCounts(list: Comment[]) {
     const counts: Record<number, number> = {};
@@ -65,7 +66,10 @@ export default function CommentsPanel({ gameId, selectedEventId, selectedEventTy
   }, [gameId]);
 
   useEffect(() => {
-    if (!editingId) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!editingId && shouldScrollRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      shouldScrollRef.current = false;
+    }
   }, [comments]);
 
   useEffect(() => {
@@ -83,6 +87,7 @@ export default function CommentsPanel({ gameId, selectedEventId, selectedEventTy
     if (!input.trim() || !gameId || !selectedEventId || sending) return;
     setSending(true);
     setError(null);
+    shouldScrollRef.current = true;
     try {
       const resp = await fetch("/api/comments", {
         method: "POST",

@@ -460,20 +460,98 @@ async def get_pipeline_status():
 
 @app.get("/api/injuries")
 async def get_injuries():
-    """Injury report from Delta table."""
-    injuries = []
+    """Injury report from Lakebase."""
     disclaimer = "Injury data is manually maintained and may not reflect the latest updates."
     try:
-        rows = await execute_sql(f"SELECT * FROM {CATALOG}.{SCHEMA}.injuries ORDER BY name")
-        injuries = rows
+        conn = get_lakebase_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, position, injury, status, timeline, updated_at FROM injuries ORDER BY name")
+        columns = [desc[0] for desc in cur.description]
+        rows = [dict(zip(columns, row)) for row in cur.fetchall()]
+        for r in rows:
+            if r.get("updated_at"):
+                r["updated_at"] = r["updated_at"].isoformat()
+        cur.close()
+        conn.close()
+        return {"injuries": rows, "disclaimer": disclaimer, "source": "lakebase"}
+    except Exception as e:
+        return {"injuries": [], "disclaimer": disclaimer, "source": "error", "detail": str(e)}
 
-        config = await execute_sql(f"SELECT config_value FROM {CATALOG}.{SCHEMA}.app_config WHERE config_key = 'injury_disclaimer'")
-        if config and config[0].get("config_value"):
-            disclaimer = config[0]["config_value"]
-    except Exception:
-        pass
 
-    return {"injuries": injuries, "disclaimer": disclaimer}
+class InjuryRequest(BaseModel):
+    name: str
+    position: str
+    injury: str
+    status: str
+    timeline: str = ""
+
+
+@app.post("/api/injuries")
+async def add_injury(req: InjuryRequest):
+    """Add an injury to Lakebase."""
+    try:
+        conn = get_lakebase_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO injuries (name, position, injury, status, timeline) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (req.name, req.position, req.injury, req.status, req.timeline),
+        )
+        result = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"id": result[0]}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Lakebase error: {e}")
+
+
+class InjuryUpdate(BaseModel):
+    name: str | None = None
+    position: str | None = None
+    injury: str | None = None
+    status: str | None = None
+    timeline: str | None = None
+
+
+@app.patch("/api/injuries/{injury_id}")
+async def update_injury(injury_id: int, req: InjuryUpdate):
+    """Update an injury in Lakebase."""
+    fields = []
+    values = []
+    for field in ["name", "position", "injury", "status", "timeline"]:
+        val = getattr(req, field)
+        if val is not None:
+            fields.append(f"{field} = %s")
+            values.append(val)
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    fields.append("updated_at = NOW()")
+    values.append(injury_id)
+    try:
+        conn = get_lakebase_conn()
+        cur = conn.cursor()
+        cur.execute(f"UPDATE injuries SET {', '.join(fields)} WHERE id = %s", values)
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"updated": injury_id}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Lakebase error: {e}")
+
+
+@app.delete("/api/injuries/{injury_id}")
+async def delete_injury(injury_id: int):
+    """Remove an injury from Lakebase."""
+    try:
+        conn = get_lakebase_conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM injuries WHERE id = %s", (injury_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"deleted": injury_id}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Lakebase error: {e}")
 
 
 def _get_token_sync() -> str:

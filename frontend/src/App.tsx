@@ -7,8 +7,9 @@ import RosterPage from "./pages/RosterPage";
 import ContractsPage from "./pages/ContractsPage";
 import VideoReviewPage from "./pages/VideoReviewPage";
 import AIChatPage from "./pages/AIChatPage";
+import PlayoffsPage from "./pages/PlayoffsPage";
 
-export type Page = "main" | "roster" | "contracts" | "video" | "ai";
+export type Page = "main" | "roster" | "contracts" | "video" | "playoffs" | "ai";
 
 function App() {
   const [skaters, setSkaters] = useState<Skater[]>([]);
@@ -111,6 +112,7 @@ function App() {
             <ContractsPage contracts={contracts} capSeasons={capSeasons} />
           )}
           {page === "video" && <VideoReviewPage />}
+          {page === "playoffs" && <PlayoffsPage standings={allStandings} />}
           {page === "ai" && <AIChatPage />}
 
           <div className="text-center py-4 mt-6 border-t border-white/10 space-y-1">
