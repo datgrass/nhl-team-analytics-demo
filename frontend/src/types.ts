@@ -130,6 +130,91 @@ export interface PlayByPlayEvent {
   situationCode?: string;
 }
 
+export interface ScoringGoal {
+  timeInPeriod: string;
+  teamAbbrev: string;
+  strength: string;
+  goalModifier: string;
+  shotType: string;
+  scorer: {
+    playerId?: number;
+    firstName: string;
+    lastName: string;
+    headshot: string;
+  };
+  assists: Array<{
+    firstName: string;
+    lastName: string;
+    playerId?: number;
+  }>;
+  awayScore: number;
+  homeScore: number;
+  highlightUrl?: string;
+}
+
+export interface ScoringPeriod {
+  periodNumber: number;
+  periodType: string;
+  goals: ScoringGoal[];
+}
+
+export interface ThreeStar {
+  star: number;
+  playerId?: number;
+  firstName: string;
+  lastName: string;
+  teamAbbrev: string;
+  position: string;
+  headshot: string;
+  goals: number;
+  assists: number;
+  points: number;
+}
+
+export interface GameSummary {
+  scoring: ScoringPeriod[];
+  threeStars: ThreeStar[];
+  source: string;
+}
+
+export interface BoxScorePlayer {
+  playerId?: number;
+  name: string;
+  sweaterNumber: number;
+  position: string;
+  goals: number;
+  assists: number;
+  points: number;
+  plusMinus: number;
+  pim: number;
+  hits: number;
+  shots: number;
+  blockedShots: number;
+  powerPlayGoals: number;
+  shifts: number;
+  faceoffWinPctg: number;
+  toi: string;
+  giveaways: number;
+  takeaways: number;
+  // Goalie fields
+  saves?: number;
+  shotsAgainst?: number;
+  goalsAgainst?: number;
+  savePctg?: number;
+  decision?: string;
+}
+
+export interface BoxScoreTeam {
+  abbrev: string;
+  skaters: BoxScorePlayer[];
+  goalies: BoxScorePlayer[];
+}
+
+export interface BoxScore {
+  teams: BoxScoreTeam[];
+  source: string;
+}
+
 export interface Contract {
   player_id: string;
   first_name: string;

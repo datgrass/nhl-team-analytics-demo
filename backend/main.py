@@ -761,6 +761,245 @@ async def get_game_landing(game_id: int):
         raise HTTPException(status_code=502, detail=f"NHL API error: {e}")
 
 
+@app.get("/api/game/{game_id}/summary")
+async def get_game_summary(game_id: int):
+    """Scoring summary & three stars — tries Delta first, falls back to NHL API."""
+    delta_error = None
+    try:
+        scoring_rows = await execute_sql(
+            f"SELECT * FROM {CATALOG}.{SCHEMA}.game_scoring_summary WHERE game_id = {game_id} ORDER BY period_number, time_in_period"
+        )
+        stars_rows = await execute_sql(
+            f"SELECT * FROM {CATALOG}.{SCHEMA}.game_three_stars WHERE game_id = {game_id} ORDER BY star_number"
+        )
+        if scoring_rows or stars_rows:
+            # Group scoring by period
+            periods: dict[int, list] = {}
+            for r in scoring_rows:
+                pn = int(r["period_number"])
+                if pn not in periods:
+                    periods[pn] = []
+                assists = []
+                if r.get("assist1_first_name"):
+                    assists.append({"firstName": r["assist1_first_name"], "lastName": r["assist1_last_name"], "playerId": r.get("assist1_player_id")})
+                if r.get("assist2_first_name"):
+                    assists.append({"firstName": r["assist2_first_name"], "lastName": r["assist2_last_name"], "playerId": r.get("assist2_player_id")})
+                periods[pn].append({
+                    "timeInPeriod": r["time_in_period"],
+                    "teamAbbrev": r["team_abbrev"],
+                    "strength": r.get("strength", "ev"),
+                    "goalModifier": r.get("goal_modifier", ""),
+                    "shotType": r.get("shot_type", ""),
+                    "scorer": {
+                        "playerId": r.get("scorer_player_id"),
+                        "firstName": r["scorer_first_name"],
+                        "lastName": r["scorer_last_name"],
+                        "headshot": r.get("scorer_headshot", ""),
+                    },
+                    "assists": assists,
+                    "awayScore": int(r["away_score"]) if r.get("away_score") is not None else 0,
+                    "homeScore": int(r["home_score"]) if r.get("home_score") is not None else 0,
+                    "highlightUrl": r.get("highlight_url", ""),
+                })
+
+            scoring = []
+            for pn in sorted(periods.keys()):
+                period_type = "REG" if pn <= 3 else "OT"
+                scoring.append({
+                    "periodNumber": pn,
+                    "periodType": period_type,
+                    "goals": periods[pn],
+                })
+
+            three_stars = []
+            for r in stars_rows:
+                three_stars.append({
+                    "star": int(r["star_number"]),
+                    "playerId": r.get("player_id"),
+                    "firstName": r.get("first_name", ""),
+                    "lastName": r.get("last_name", ""),
+                    "teamAbbrev": r.get("team_abbrev", ""),
+                    "position": r.get("position", ""),
+                    "headshot": r.get("headshot", ""),
+                    "goals": int(r.get("goals", 0)),
+                    "assists": int(r.get("assists", 0)),
+                    "points": int(r.get("points", 0)),
+                })
+
+            return {"scoring": scoring, "threeStars": three_stars, "source": "databricks"}
+    except Exception as e:
+        delta_error = str(e)
+
+    # Fallback to NHL API
+    try:
+        data = await fetch_json(f"{NHL_API_BASE}/gamecenter/{game_id}/landing")
+        summary = data.get("summary", {})
+
+        scoring = []
+        for period_data in summary.get("scoring", []):
+            pd_desc = period_data.get("periodDescriptor", {})
+            goals = []
+            for goal in period_data.get("goals", []):
+                assists_raw = goal.get("assists", [])
+                assists = [{"firstName": a.get("firstName", {}).get("default", ""), "lastName": a.get("lastName", {}).get("default", ""), "playerId": a.get("playerId")} for a in assists_raw]
+                goals.append({
+                    "timeInPeriod": goal.get("timeInPeriod", ""),
+                    "teamAbbrev": goal.get("teamAbbrev", {}).get("default", ""),
+                    "strength": goal.get("strength", "ev"),
+                    "goalModifier": goal.get("goalModifier", ""),
+                    "shotType": goal.get("shotType", ""),
+                    "scorer": {
+                        "playerId": goal.get("playerId"),
+                        "firstName": goal.get("firstName", {}).get("default", ""),
+                        "lastName": goal.get("lastName", {}).get("default", ""),
+                        "headshot": goal.get("headshot", ""),
+                    },
+                    "assists": assists,
+                    "awayScore": goal.get("awayScore", 0),
+                    "homeScore": goal.get("homeScore", 0),
+                    "highlightUrl": goal.get("highlightClip", ""),
+                })
+            scoring.append({
+                "periodNumber": pd_desc.get("number", 0),
+                "periodType": pd_desc.get("periodType", "REG"),
+                "goals": goals,
+            })
+
+        three_stars = []
+        for star in summary.get("threeStars", []):
+            fn = star.get("firstName", star.get("name", ""))
+            ln = star.get("lastName", "")
+            ta = star.get("teamAbbrev", "")
+            if isinstance(fn, dict): fn = fn.get("default", "")
+            if isinstance(ln, dict): ln = ln.get("default", "")
+            if isinstance(ta, dict): ta = ta.get("default", "")
+            three_stars.append({
+                "star": star.get("star", 0),
+                "playerId": star.get("playerId"),
+                "firstName": fn,
+                "lastName": ln,
+                "teamAbbrev": ta,
+                "position": star.get("position", ""),
+                "headshot": star.get("headshot", ""),
+                "goals": star.get("goals", 0),
+                "assists": star.get("assists", 0),
+                "points": star.get("points", 0),
+            })
+
+        return {"scoring": scoring, "threeStars": three_stars, "source": "nhl_api", "delta_error": delta_error}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Both sources failed. Delta: {delta_error}. NHL API: {e}")
+
+
+def _extract_name(val):
+    """Extract name string from either a dict like {"default": "..."} or a plain string."""
+    if isinstance(val, dict):
+        return val.get("default", "")
+    return val or ""
+
+
+@app.get("/api/game/{game_id}/boxscore")
+async def get_game_boxscore(game_id: int):
+    """Box score — tries Delta first, falls back to NHL API."""
+    delta_error = None
+    try:
+        rows = await execute_sql(
+            f"SELECT * FROM {CATALOG}.{SCHEMA}.game_boxscore WHERE game_id = {game_id} ORDER BY team_abbrev, player_type DESC, points DESC, goals DESC"
+        )
+        if rows:
+            teams: dict[str, dict] = {}
+            for r in rows:
+                ta = r["team_abbrev"]
+                if ta not in teams:
+                    teams[ta] = {"abbrev": ta, "skaters": [], "goalies": []}
+                player = {
+                    "playerId": r.get("player_id"),
+                    "name": r["name"],
+                    "sweaterNumber": int(r.get("sweater_number", 0)),
+                    "position": r.get("position", ""),
+                    "goals": int(r.get("goals", 0)),
+                    "assists": int(r.get("assists", 0)),
+                    "points": int(r.get("points", 0)),
+                    "plusMinus": int(r.get("plus_minus", 0)),
+                    "pim": int(r.get("pim", 0)),
+                    "hits": int(r.get("hits", 0)),
+                    "shots": int(r.get("shots", 0)),
+                    "blockedShots": int(r.get("blocked_shots", 0)),
+                    "powerPlayGoals": int(r.get("power_play_goals", 0)),
+                    "shifts": int(r.get("shifts", 0)),
+                    "faceoffWinPctg": float(r.get("faceoff_win_pctg", 0)),
+                    "toi": r.get("toi", "0:00"),
+                    "giveaways": int(r.get("giveaways", 0)),
+                    "takeaways": int(r.get("takeaways", 0)),
+                }
+                if r["player_type"] == "goalie":
+                    player.update({
+                        "saves": int(r.get("saves", 0)),
+                        "shotsAgainst": int(r.get("shots_against", 0)),
+                        "goalsAgainst": int(r.get("goals_against", 0)),
+                        "savePctg": float(r.get("save_pctg", 0)),
+                        "decision": r.get("decision", ""),
+                    })
+                    teams[ta]["goalies"].append(player)
+                else:
+                    teams[ta]["skaters"].append(player)
+            return {"teams": list(teams.values()), "source": "databricks"}
+    except Exception as e:
+        delta_error = str(e)
+
+    # Fallback to NHL API
+    try:
+        data = await fetch_json(f"{NHL_API_BASE}/gamecenter/{game_id}/boxscore")
+        pgs = data.get("playerByGameStats", {})
+        result_teams = []
+        for side in ["awayTeam", "homeTeam"]:
+            team_data = data.get(side, {})
+            abbrev = team_data.get("abbrev", "")
+            side_stats = pgs.get(side, {})
+            skaters = []
+            for group in ["forwards", "defense"]:
+                for p in side_stats.get(group, []):
+                    skaters.append({
+                        "playerId": p.get("playerId"),
+                        "name": _extract_name(p.get("name", "")),
+                        "sweaterNumber": p.get("sweaterNumber", 0),
+                        "position": p.get("position", group[0].upper()),
+                        "goals": p.get("goals", 0),
+                        "assists": p.get("assists", 0),
+                        "points": p.get("points", 0),
+                        "plusMinus": p.get("plusMinus", 0),
+                        "pim": p.get("pim", 0),
+                        "hits": p.get("hits", 0),
+                        "shots": p.get("sog", 0),
+                        "blockedShots": p.get("blockedShots", 0),
+                        "powerPlayGoals": p.get("powerPlayGoals", 0),
+                        "shifts": p.get("shifts", 0),
+                        "faceoffWinPctg": p.get("faceoffWinningPctg", 0),
+                        "toi": p.get("toi", "0:00"),
+                        "giveaways": p.get("giveaways", 0),
+                        "takeaways": p.get("takeaways", 0),
+                    })
+            goalies = []
+            for p in side_stats.get("goalies", []):
+                goalies.append({
+                    "playerId": p.get("playerId"),
+                    "name": _extract_name(p.get("name", "")),
+                    "sweaterNumber": p.get("sweaterNumber", 0),
+                    "position": "G",
+                    "toi": p.get("toi", "0:00"),
+                    "pim": p.get("pim", 0),
+                    "saves": p.get("saves", 0),
+                    "shotsAgainst": p.get("shotsAgainst", 0),
+                    "goalsAgainst": p.get("goalsAgainst", 0),
+                    "savePctg": p.get("savePctg", 0),
+                    "decision": p.get("decision", ""),
+                })
+            result_teams.append({"abbrev": abbrev, "skaters": skaters, "goalies": goalies})
+        return {"teams": result_teams, "source": "nhl_api", "delta_error": delta_error}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Both sources failed. Delta: {delta_error}. NHL API: {e}")
+
+
 class ChatRequest(BaseModel):
     message: str
     history: list[dict] = []

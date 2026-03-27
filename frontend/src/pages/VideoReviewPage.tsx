@@ -17,9 +17,17 @@ const EVENT_TYPES: Record<string, { label: string; color: string; icon: string }
 
 const FILTER_KEYS = ["goal", "shot-on-goal", "hit", "penalty", "takeaway", "giveaway", "blocked-shot"];
 
-export default function VideoReviewPage() {
+interface VideoReviewProps {
+  initialGameId?: number | null;
+  onNavigateToSummary?: (gameId: number) => void;
+  onGameChange?: (gameId: number) => void;
+  embedded?: boolean;
+  externalGameId?: number | null;
+}
+
+export default function VideoReviewPage({ initialGameId, onNavigateToSummary, onGameChange, embedded, externalGameId }: VideoReviewProps) {
   const [games, setGames] = useState<Game[]>([]);
-  const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
+  const [selectedGameId, setSelectedGameId] = useState<number | null>(initialGameId ?? null);
   const [events, setEvents] = useState<PlayByPlayEvent[]>([]);
   const [players, setPlayers] = useState<Record<number, string>>({});
   const [teams, setTeams] = useState<{ home: any; away: any } | null>(null);
@@ -29,13 +37,25 @@ export default function VideoReviewPage() {
   const [periodFilter, setPeriodFilter] = useState<number | null>(null);
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
 
-  // Load game list
+  // Sync with external game ID when embedded
   useEffect(() => {
+    if (embedded && externalGameId && externalGameId !== selectedGameId) {
+      setSelectedGameId(externalGameId);
+    }
+  }, [embedded, externalGameId]);
+
+  // Load game list (skip when embedded — parent owns the selector)
+  useEffect(() => {
+    if (embedded) return;
     fetch("/api/games")
       .then((r) => r.json())
       .then((data) => {
         setGames(data);
-        if (data.length > 0) setSelectedGameId(data[0].id);
+        if (initialGameId && data.some((g: Game) => g.id === initialGameId)) {
+          setSelectedGameId(initialGameId);
+        } else if (data.length > 0) {
+          setSelectedGameId(data[0].id);
+        }
       });
   }, []);
 
@@ -133,53 +153,68 @@ export default function VideoReviewPage() {
 
   return (
     <div className="space-y-6">
-      {/* Game Selector */}
-      <div className="bg-avs-dark rounded-xl p-6 card-glow">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <h2 className="text-xl font-bold flex items-center gap-2">
-            <span className="w-1 h-6 bg-avs-burgundy rounded-full" />
-            Video Review
-          </h2>
-          <select
-            value={selectedGameId || ""}
-            onChange={(e) => setSelectedGameId(Number(e.target.value))}
-            className="bg-avs-darker text-white text-sm font-medium rounded-lg px-4 py-2 border border-white/10 focus:border-avs-burgundy focus:outline-none cursor-pointer min-w-[300px]"
-          >
-            {games.map((g) => {
-              const date = new Date(g.startTimeUTC).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-              });
-              const isHome = g.homeTeam.abbrev === "COL";
-              const opp = isHome ? g.awayTeam.abbrev : g.homeTeam.abbrev;
-              const prefix = isHome ? "vs" : "@";
-              const score = `${g.awayTeam.score}-${g.homeTeam.score}`;
-              return (
-                <option key={g.id} value={g.id}>
-                  {date} {prefix} {opp} ({score})
-                </option>
-              );
-            })}
-          </select>
-        </div>
+      {!embedded && (
+        <>
+          {/* Game Selector */}
+          <div className="bg-avs-dark rounded-xl p-6 card-glow">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <span className="w-1 h-6 bg-avs-burgundy rounded-full" />
+                Video Review
+              </h2>
+              <select
+                value={selectedGameId || ""}
+                onChange={(e) => { const id = Number(e.target.value); setSelectedGameId(id); onGameChange?.(id); }}
+                className="bg-avs-darker text-white text-sm font-medium rounded-lg px-4 py-2 border border-white/10 focus:border-avs-burgundy focus:outline-none cursor-pointer min-w-[300px]"
+              >
+                {games.map((g) => {
+                  const date = new Date(g.startTimeUTC).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  });
+                  const isHome = g.homeTeam.abbrev === "COL";
+                  const opp = isHome ? g.awayTeam.abbrev : g.homeTeam.abbrev;
+                  const prefix = isHome ? "vs" : "@";
+                  const score = `${g.awayTeam.score}-${g.homeTeam.score}`;
+                  return (
+                    <option key={g.id} value={g.id}>
+                      {date} {prefix} {opp} ({score})
+                    </option>
+                  );
+                })}
+              </select>
+              {onNavigateToSummary && selectedGameId && (
+                <button
+                  onClick={() => onNavigateToSummary(selectedGameId)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-avs-darker text-avs-silver hover:bg-white/10 hover:text-white transition-all border border-white/10"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                  </svg>
+                  Game Summary
+                </button>
+              )}
+            </div>
 
-        {/* Game Score Banner */}
-        {selectedGame && teams && (
-          <div className="mt-4 flex items-center justify-center gap-8 bg-avs-darker rounded-lg p-4">
-            <div className="flex items-center gap-3">
-              {teams.away?.logo && <img src={teams.away.logo} alt="" className="w-10 h-10" />}
-              <span className="text-lg font-bold">{teams.away?.abbrev}</span>
-              <span className="text-3xl font-extrabold">{selectedGame.awayTeam.score}</span>
-            </div>
-            <div className="text-avs-silver text-sm">FINAL{selectedGame.gameOutcome?.lastPeriodType !== "REG" ? ` (${selectedGame.gameOutcome?.lastPeriodType})` : ""}</div>
-            <div className="flex items-center gap-3">
-              <span className="text-3xl font-extrabold">{selectedGame.homeTeam.score}</span>
-              <span className="text-lg font-bold">{teams.home?.abbrev}</span>
-              {teams.home?.logo && <img src={teams.home.logo} alt="" className="w-10 h-10" />}
-            </div>
+            {/* Game Score Banner */}
+            {selectedGame && teams && (
+              <div className="mt-4 flex items-center justify-center gap-8 bg-avs-darker rounded-lg p-4">
+                <div className="flex items-center gap-3">
+                  {teams.away?.logo && <img src={teams.away.logo} alt="" className="w-10 h-10" />}
+                  <span className="text-lg font-bold">{teams.away?.abbrev}</span>
+                  <span className="text-3xl font-extrabold">{selectedGame.awayTeam.score}</span>
+                </div>
+                <div className="text-avs-silver text-sm">FINAL{selectedGame.gameOutcome?.lastPeriodType !== "REG" ? ` (${selectedGame.gameOutcome?.lastPeriodType})` : ""}</div>
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl font-extrabold">{selectedGame.homeTeam.score}</span>
+                  <span className="text-lg font-bold">{teams.home?.abbrev}</span>
+                  {teams.home?.logo && <img src={teams.home.logo} alt="" className="w-10 h-10" />}
+                </div>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-12">

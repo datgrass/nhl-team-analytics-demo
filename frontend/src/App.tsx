@@ -5,11 +5,11 @@ import TeamHeader from "./components/TeamHeader";
 import MainPage from "./pages/MainPage";
 import RosterPage from "./pages/RosterPage";
 import ContractsPage from "./pages/ContractsPage";
-import VideoReviewPage from "./pages/VideoReviewPage";
 import AIChatPage from "./pages/AIChatPage";
 import PlayoffsPage from "./pages/PlayoffsPage";
+import GameSummaryPage from "./pages/GameSummaryPage";
 
-export type Page = "main" | "roster" | "contracts" | "video" | "playoffs" | "ai";
+export type Page = "main" | "roster" | "contracts" | "summary" | "playoffs" | "ai";
 
 function App() {
   const [skaters, setSkaters] = useState<Skater[]>([]);
@@ -24,6 +24,7 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [dataSource, setDataSource] = useState<string>("loading");
   const [lastIngested, setLastIngested] = useState<string | null>(null);
+  const [sharedGameId, setSharedGameId] = useState<number | null>(null);
 
   useEffect(() => {
     async function fetchAll() {
@@ -111,7 +112,12 @@ function App() {
           {page === "contracts" && (
             <ContractsPage contracts={contracts} capSeasons={capSeasons} />
           )}
-          {page === "video" && <VideoReviewPage />}
+          {page === "summary" && (
+            <GameSummaryPage
+              initialGameId={sharedGameId}
+              onGameChange={setSharedGameId}
+            />
+          )}
           {page === "playoffs" && <PlayoffsPage standings={allStandings} />}
           {page === "ai" && <AIChatPage />}
 
