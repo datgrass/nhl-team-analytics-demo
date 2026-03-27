@@ -20,7 +20,7 @@ PROFILE=""
 WAREHOUSE_ID=""
 LAKEBASE_INSTANCE="nhl-comments"
 MODEL_ENDPOINT="databricks-claude-sonnet-4-5"
-PUCKPEDIA_KEY="JokWhjFFF872JK8jf009NHNk"
+PUCKPEDIA_KEY="YOUR_PUCKPEDIA_API_KEY"
 
 # Parse args
 while [[ $# -gt 0 ]]; do

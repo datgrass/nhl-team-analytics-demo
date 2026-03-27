@@ -8,7 +8,7 @@ command:
 
 env:
   - name: PUCKPEDIA_API_KEY
-    value: JokWhjFFF872JK8jf009NHNk
+    value: YOUR_PUCKPEDIA_API_KEY
   - name: DATABRICKS_WAREHOUSE_ID
     value: c6b1b633e4072e67
   - name: LAKEBASE_HOST

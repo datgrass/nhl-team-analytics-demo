@@ -96,7 +96,7 @@ async def execute_sql(query: str) -> list[dict]:
 
 NHL_API_BASE = "https://api-web.nhle.com/v1"
 PUCKPEDIA_API = "https://puckpedia.com/api/v2/players"
-PUCKPEDIA_API_KEY = os.getenv("PUCKPEDIA_API_KEY", "JokWhjFFF872JK8jf009NHNk")
+PUCKPEDIA_API_KEY = os.getenv("PUCKPEDIA_API_KEY", "YOUR_PUCKPEDIA_API_KEY")
 
 # Colorado Avalanche
 TEAM_ABBREV = "COL"

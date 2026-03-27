@@ -11,7 +11,7 @@ variables:
     description: "Lakebase read-write DNS hostname"
   puckpedia_api_key:
     description: "Puck Pedia API key"
-    default: "JokWhjFFF872JK8jf009NHNk"
+    default: "YOUR_PUCKPEDIA_API_KEY"
   model_endpoint:
     description: "Foundation Model API endpoint name"
     default: "databricks-claude-sonnet-4-5"

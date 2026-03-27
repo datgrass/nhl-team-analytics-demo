@@ -15,7 +15,7 @@ CATALOG = "nhl_demo_catalog"
 SCHEMA = "nhl_analytics"
 NHL_API = "https://api-web.nhle.com/v1"
 PUCKPEDIA_API = "https://puckpedia.com/api/v2/players"
-PUCKPEDIA_KEY = "JokWhjFFF872JK8jf009NHNk"
+PUCKPEDIA_KEY = "YOUR_PUCKPEDIA_API_KEY"
 TEAM = "COL"
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
